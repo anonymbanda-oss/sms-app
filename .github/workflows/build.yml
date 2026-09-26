@@ -50,7 +50,7 @@ jobs:
 
 
       # --------------------------------------------------
-      # 5. Check installed versions
+      # 5. Check environment
       # --------------------------------------------------
       - name: Check environment
         run: |
@@ -71,21 +71,28 @@ jobs:
       # 6. Install npm packages
       # --------------------------------------------------
       - name: Install npm packages
-        run: npm install
+        run: |
+          npm install
+          echo "TypeScript version:"
+          npx tsc --version
+          echo "Capacitor version:"
+          npx cap --version
 
 
       # --------------------------------------------------
       # 7. Add Android platform
       # --------------------------------------------------
       - name: Add Android platform
-        run: npx cap add android
+        run: |
+          npx cap add android
 
 
       # --------------------------------------------------
       # 8. Sync Capacitor
       # --------------------------------------------------
       - name: Sync Capacitor
-        run: npx cap sync android
+        run: |
+          npx cap sync android
 
 
       # --------------------------------------------------
@@ -144,8 +151,6 @@ jobs:
 
           done
 
-          # Remove default adaptive icon XML so our generated PNG
-          # is used directly as the launcher icon.
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
 
@@ -245,7 +250,7 @@ jobs:
 
 
       # --------------------------------------------------
-      # 14. Prepare release folder
+      # 14. Prepare APK
       # --------------------------------------------------
       - name: Prepare APK
         shell: bash
