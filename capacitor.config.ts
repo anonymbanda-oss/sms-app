@@ -4,14 +4,19 @@ const config: CapacitorConfig = {
   appId: 'com.sohelmodelschool.sms',
   appName: 'SMS',
   webDir: 'www',
+
   backgroundColor: '#FFFFFF',
   loggingBehavior: 'none',
 
-  // The Android app loads the live website.
-  // Website updates therefore appear in the app without rebuilding the APK.
   server: {
     url: 'https://www.sohelmodelschool.com',
-    cleartext: false
+    cleartext: false,
+
+    // Keep the website inside the Android WebView
+    allowNavigation: [
+      'www.sohelmodelschool.com',
+      'sohelmodelschool.com'
+    ]
   },
 
   android: {
