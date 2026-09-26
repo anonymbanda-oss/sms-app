@@ -8,45 +8,114 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Build SMS Android APK
+    runs-on: ubuntu-24.04
 
     steps:
+
+      # --------------------------------------------------
+      # 1. Checkout repository
+      # --------------------------------------------------
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
+
+      # --------------------------------------------------
+      # 2. Setup Node.js
+      # --------------------------------------------------
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: '24'
+          package-manager-cache: false
 
+
+      # --------------------------------------------------
+      # 3. Setup Java 21
+      # --------------------------------------------------
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
-          distribution: temurin
+          distribution: 'temurin'
           java-version: '21'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
 
+      # --------------------------------------------------
+      # 4. Setup Android SDK
+      # --------------------------------------------------
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+
+
+      # --------------------------------------------------
+      # 5. Check installed versions
+      # --------------------------------------------------
+      - name: Check environment
+        run: |
+          echo "Node:"
+          node --version
+
+          echo "NPM:"
+          npm --version
+
+          echo "Java:"
+          java -version
+
+          echo "Android SDK:"
+          sdkmanager --version
+
+
+      # --------------------------------------------------
+      # 6. Install npm packages
+      # --------------------------------------------------
       - name: Install npm packages
         run: npm install
 
+
+      # --------------------------------------------------
+      # 7. Add Android platform
+      # --------------------------------------------------
       - name: Add Android platform
         run: npx cap add android
 
+
+      # --------------------------------------------------
+      # 8. Sync Capacitor
+      # --------------------------------------------------
       - name: Sync Capacitor
         run: npx cap sync android
 
+
+      # --------------------------------------------------
+      # 9. Install ImageMagick
+      # --------------------------------------------------
+      - name: Install ImageMagick
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+
+
+      # --------------------------------------------------
+      # 10. Generate Android launcher icons
+      # --------------------------------------------------
       - name: Generate launcher icons
         shell: bash
         run: |
           set -e
 
           if [ ! -f "assets/icon.png" ]; then
-            echo "ERROR: assets/icon.png is missing."
-            echo "Replace assets/icon.png with your official SMS logo before building."
+            echo "ERROR: assets/icon.png was not found."
+            echo ""
+            echo "Please put your SMS app icon here:"
+            echo "assets/icon.png"
+            echo ""
+            echo "Recommended: 1024 x 1024 PNG"
             exit 1
           fi
+
+          echo "Generating Android launcher icons..."
 
           declare -A SIZES=(
             [mipmap-mdpi]=48
@@ -57,35 +126,39 @@ jobs:
           )
 
           for DIR in "${!SIZES[@]}"; do
+
             SIZE=${SIZES[$DIR]}
+
             mkdir -p "android/app/src/main/res/$DIR"
 
-            python3 - "$SIZE" "$DIR" <<'PY'
-          import sys
-          from PIL import Image
+            convert "assets/icon.png" \
+              -resize "${SIZE}x${SIZE}" \
+              -background none \
+              -gravity center \
+              -extent "${SIZE}x${SIZE}" \
+              "android/app/src/main/res/$DIR/ic_launcher.png"
 
-          size = int(sys.argv[1])
-          folder = sys.argv[2]
+            cp \
+              "android/app/src/main/res/$DIR/ic_launcher.png" \
+              "android/app/src/main/res/$DIR/ic_launcher_round.png"
 
-          src = Image.open("assets/icon.png").convert("RGBA")
-          src.thumbnail((size, size), Image.Resampling.LANCZOS)
-
-          canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-          x = (size - src.width) // 2
-          y = (size - src.height) // 2
-          canvas.alpha_composite(src, (x, y))
-
-          canvas.save(f"android/app/src/main/res/{folder}/ic_launcher.png")
-          canvas.save(f"android/app/src/main/res/{folder}/ic_launcher_round.png")
-          PY
           done
 
+          # Remove default adaptive icon XML so our generated PNG
+          # is used directly as the launcher icon.
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
           rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
 
+          echo "Launcher icons generated successfully."
+
+
+      # --------------------------------------------------
+      # 11. Configure Android back button
+      # --------------------------------------------------
       - name: Configure Android back button
         shell: bash
         run: |
+
           mkdir -p android/app/src/main/java/com/sohelmodelschool/sms
 
           cat > android/app/src/main/java/com/sohelmodelschool/sms/MainActivity.java <<'EOF'
@@ -103,58 +176,98 @@ jobs:
               public void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
 
-                  getOnBackPressedDispatcher().addCallback(this,
+                  getOnBackPressedDispatcher().addCallback(
+                      this,
                       new OnBackPressedCallback(true) {
+
                           @Override
                           public void handleOnBackPressed() {
-                              if (getBridge() != null
-                                      && getBridge().getWebView() != null
-                                      && getBridge().getWebView().canGoBack()) {
+
+                              if (
+                                  getBridge() != null &&
+                                  getBridge().getWebView() != null &&
+                                  getBridge().getWebView().canGoBack()
+                              ) {
                                   getBridge().getWebView().goBack();
                               } else {
                                   finish();
                               }
                           }
-                      });
+                      }
+                  );
               }
           }
           EOF
 
+          echo "Android back button configured."
+
+
+      # --------------------------------------------------
+      # 12. Set application name
+      # --------------------------------------------------
       - name: Set app name
         shell: bash
         run: |
+
           python3 - <<'PY'
+
           from pathlib import Path
           import re
 
-          p = Path("android/app/src/main/res/values/strings.xml")
-          s = p.read_text(encoding="utf-8")
-
-          s = re.sub(
-              r'<string name="app_name">.*?</string>',
-              '<string name="app_name">SMS</string>',
-              s,
-              flags=re.S
+          path = Path(
+              "android/app/src/main/res/values/strings.xml"
           )
 
-          p.write_text(s, encoding="utf-8")
+          text = path.read_text(encoding="utf-8")
+
+          text = re.sub(
+              r'<string name="app_name">.*?</string>',
+              '<string name="app_name">SMS</string>',
+              text,
+              flags=re.DOTALL
+          )
+
+          path.write_text(text, encoding="utf-8")
+
+          print("App name set to SMS.")
+
           PY
 
+
+      # --------------------------------------------------
+      # 13. Build Debug APK
+      # --------------------------------------------------
       - name: Build APK
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew --no-daemon assembleDebug
 
+
+      # --------------------------------------------------
+      # 14. Prepare release folder
+      # --------------------------------------------------
       - name: Prepare APK
         shell: bash
         run: |
-          mkdir -p release
-          cp android/app/build/outputs/apk/debug/app-debug.apk release/SMS.apk
 
-      - name: Upload APK
+          mkdir -p release
+
+          cp \
+            android/app/build/outputs/apk/debug/app-debug.apk \
+            release/SMS.apk
+
+          echo "APK prepared:"
+          ls -lh release/SMS.apk
+
+
+      # --------------------------------------------------
+      # 15. Upload APK to GitHub Actions
+      # --------------------------------------------------
+      - name: Upload SMS APK
         uses: actions/upload-artifact@v4
         with:
           name: SMS-APK
           path: release/SMS.apk
+          if-no-files-found: error
           retention-days: 30
