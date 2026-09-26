@@ -1,0 +1,160 @@
+name: Build SMS APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install npm packages
+        run: npm install
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - name: Generate launcher icons
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -f "assets/icon.png" ]; then
+            echo "ERROR: assets/icon.png is missing."
+            echo "Replace assets/icon.png with your official SMS logo before building."
+            exit 1
+          fi
+
+          declare -A SIZES=(
+            [mipmap-mdpi]=48
+            [mipmap-hdpi]=72
+            [mipmap-xhdpi]=96
+            [mipmap-xxhdpi]=144
+            [mipmap-xxxhdpi]=192
+          )
+
+          for DIR in "${!SIZES[@]}"; do
+            SIZE=${SIZES[$DIR]}
+            mkdir -p "android/app/src/main/res/$DIR"
+
+            python3 - "$SIZE" "$DIR" <<'PY'
+          import sys
+          from PIL import Image
+
+          size = int(sys.argv[1])
+          folder = sys.argv[2]
+
+          src = Image.open("assets/icon.png").convert("RGBA")
+          src.thumbnail((size, size), Image.Resampling.LANCZOS)
+
+          canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+          x = (size - src.width) // 2
+          y = (size - src.height) // 2
+          canvas.alpha_composite(src, (x, y))
+
+          canvas.save(f"android/app/src/main/res/{folder}/ic_launcher.png")
+          canvas.save(f"android/app/src/main/res/{folder}/ic_launcher_round.png")
+          PY
+          done
+
+          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+
+      - name: Configure Android back button
+        shell: bash
+        run: |
+          mkdir -p android/app/src/main/java/com/sohelmodelschool/sms
+
+          cat > android/app/src/main/java/com/sohelmodelschool/sms/MainActivity.java <<'EOF'
+          package com.sohelmodelschool.sms;
+
+          import android.os.Bundle;
+
+          import androidx.activity.OnBackPressedCallback;
+
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  getOnBackPressedDispatcher().addCallback(this,
+                      new OnBackPressedCallback(true) {
+                          @Override
+                          public void handleOnBackPressed() {
+                              if (getBridge() != null
+                                      && getBridge().getWebView() != null
+                                      && getBridge().getWebView().canGoBack()) {
+                                  getBridge().getWebView().goBack();
+                              } else {
+                                  finish();
+                              }
+                          }
+                      });
+              }
+          }
+          EOF
+
+      - name: Set app name
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("android/app/src/main/res/values/strings.xml")
+          s = p.read_text(encoding="utf-8")
+
+          s = re.sub(
+              r'<string name="app_name">.*?</string>',
+              '<string name="app_name">SMS</string>',
+              s,
+              flags=re.S
+          )
+
+          p.write_text(s, encoding="utf-8")
+          PY
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Prepare APK
+        shell: bash
+        run: |
+          mkdir -p release
+          cp android/app/build/outputs/apk/debug/app-debug.apk release/SMS.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SMS-APK
+          path: release/SMS.apk
+          retention-days: 30
