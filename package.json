@@ -1,0 +1,16 @@
+{
+  "name": "sms-android-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SMS - Sohel Model School Android wrapper",
+  "scripts": {
+    "build": "node -e \"console.log('Live website wrapper - no local web build required.')\""
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.0.0"
+  }
+}
